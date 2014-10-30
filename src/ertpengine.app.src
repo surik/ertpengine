@@ -1,0 +1,13 @@
+{application, ertpengine,
+ [
+  {description, "RTPEngine Erlang client"},
+  {vsn, "1.0.0.0"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib,
+                  crypto
+                 ]},
+  {mod, { ertpengine_app, []}},
+  {env, []}
+ ]}.
