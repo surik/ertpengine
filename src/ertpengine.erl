@@ -1,98 +1,119 @@
 -module(ertpengine).
 
--behaviour(gen_server).
-
 %% API
--export([start_link/0, start_link/1, start_link/2,
-         do_command/1,
-         ping/0,
-         offer/3, offer/4,
-         answer/4, answer/5,
-         delete/2, delete/3,
-         list/0, list/1,
-         query/1, query/2
+-export([new_connection/1, new_connection/2,
+         stop_connection/1,
+         do_command/2,
+         ping/1,
+         offer/4, offer/5,
+         answer/5, answer/6,
+         delete/3, delete/4,
+         list/1, list/2,
+         query/2, query/3
         ]).
 
-%% gen_server callbacks
--export([init/1,
-         handle_call/3,
-         handle_cast/2,
-         handle_info/2,
-         terminate/2,
-         code_change/3]).
-
--record(state, {
-    socket,
-    proxy_ip = "127.0.0.1",
-    proxy_port = 11234,
-    tx_list = gb_trees:empty()
-}).
-
--define(COOKIE_LEN, 16).
+-type ertpengine_command_key() :: nonempty_string() | binary().
+-type ertpengine_command_value() :: nonempty_string() | integer() | 
+                                    {list, list(ertpengine_command_value())} | 
+                                    [{dict, dict:dict()}].
+-type ertpengine_command() :: [{ertpengine_command_key(), ertpengine_command_value()}].
 
 %%%===================================================================
 %%% API
 %%%===================================================================
-start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+-spec new_connection(Name :: atom()) -> atom().
+new_connection(Name) ->
+    new_connection(Name, []).
 
-start_link(Ip) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [{ip, Ip}], []).
+-spec new_connection(Name :: atom(), Opts :: [proplists:properties()]) -> 
+    atom().
+new_connection(Name, Opts) ->
+    case ertpengine_sup:start_server(Name, Opts) of
+        {error, _} =  Error -> Error;
+        _ -> ok
+    end.
 
-start_link(Ip, Port) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [{ip, Ip}, {port, Port}], []).
+-spec stop_connection(Name :: atom()) -> ok | {error, Error :: term()}.
+stop_connection(Name) ->
+    ertpengine_sup:stop_server(Name).
 
-do_command(Args) ->
-    {{dict, Data}, _} = gen_server:call(?MODULE, {do_command, Args}),
-    Data.
+-spec do_command(Name :: atom(), Command :: ertpengine_command()) -> dict:dict().
+do_command(Name, Args) ->
+    ertpengine_server:do_command(Name, Args).
 
-ping() ->
+-spec ping(Name :: atom()) -> pong | {error, Error :: term()}.
+ping(Name) ->
     Args = [{"command", "ping"}],
-    case dict:fetch(<<"result">>, do_command(Args)) of
-        <<"pong">> -> ok;
+    case dict:fetch(<<"result">>, do_command(Name, Args)) of
+        <<"pong">> -> pong;
         E -> {error, E}
     end.
 
-offer(CallId, FromTag, SDP) -> offer(CallId, FromTag, SDP, []).
-offer(CallId, FromTag, SDP, Args) -> 
+-spec offer(Name :: atom(), CallId :: nonempty_string(), 
+            FromTag :: nonempty_string(), SDP :: nonempty_string()) ->
+    {ok, NewSDP :: nonempty_string()} | {error, Error :: term()}.
+offer(Name, CallId, FromTag, SDP) -> offer(Name, CallId, FromTag, SDP, []).
+
+-spec offer(Name :: atom(), CallId :: nonempty_string(), 
+            FromTag :: nonempty_string(), SDP :: nonempty_string(), Args :: list()) ->
+    {ok, NewSDP :: nonempty_string()} | {error, Error :: term()}.
+offer(Name, CallId, FromTag, SDP, Args) -> 
     Args1 = [{"command", "offer"}, 
              {"call-id", CallId}, 
              {"from-tag", FromTag},
              {"sdp", SDP} | Args],
-    Data = do_command(Args1),
+    Data = do_command(Name, Args1),
     case dict:fetch(<<"result">>, Data) of
         <<"ok">> -> {ok, dict:fetch(<<"sdp">>, Data)};
         E -> {error, E}
     end.
 
-answer(CallId, FromTag, ToTag, SDP) -> answer(CallId, FromTag, ToTag, SDP, []).
-answer(CallId, FromTag, ToTag, SDP, Args) -> 
+-spec answer(Name :: atom(), CallId :: nonempty_string(), 
+             FromTag :: nonempty_string(), ToTag :: nonempty_string(), SDP :: nonempty_string()) ->
+    {ok, NewSDP :: nonempty_string()} | {error, Error :: term()}.
+answer(Name, CallId, FromTag, ToTag, SDP) -> answer(Name, CallId, FromTag, ToTag, SDP, []).
+
+-spec answer(Name :: atom(), CallId :: nonempty_string(), 
+             FromTag :: nonempty_string(), ToTag :: nonempty_string(), 
+             ToTag :: nonempty_string(), SDP :: nonempty_string()) ->
+    {ok, NewSDP :: nonempty_string()} | {error, Error :: term()}.
+answer(Name, CallId, FromTag, ToTag, SDP, Args) -> 
     Args1 = [{"command", "answer"}, 
              {"call-id", CallId}, 
              {"from-tag", FromTag}, 
              {"to-tag", ToTag},
              {"sdp", SDP} | Args],
-    Data = do_command(Args1),
+    Data = do_command(Name, Args1),
     case dict:fetch(<<"result">>, Data) of
         <<"ok">> -> {ok, dict:fetch(<<"sdp">>, Data)};
         E -> {error, E}
     end.
 
-delete(CallId, FromTag) -> delete(CallId, FromTag, []).
-delete(CallId, FromTag, Args) -> 
+-spec delete(Name :: atom(), CallId :: nonempty_string(), FromTag :: nonempty_string()) ->
+    {ok, NewSDP :: nonempty_string()} | {error, Error :: term()}.
+delete(Name, CallId, FromTag) -> delete(Name, CallId, FromTag, []).
+
+-spec delete(Name :: atom(), CallId :: nonempty_string(), FromTag :: nonempty_string(), Args :: list()) ->
+    {ok, Data :: dict:dict()} | {error, Error :: term()}.
+delete(Name, CallId, FromTag, Args) -> 
     Args1 = [{"command", "delete"}, 
              {"call-id", CallId}, 
              {"from-tag", FromTag} | Args],
-    Data = do_command(Args1),
+    Data = do_command(Name, Args1),
     case dict:fetch(<<"result">>, Data) of
         <<"ok">> -> {ok, Data};
         E -> {error, E}
     end.
 
-list() -> list(32).
-list(Limit) ->
+-spec list(Name :: atom()) ->
+    {ok, List :: [binary()]} | {error, Error :: term()}.
+list(Name) -> list(Name, 32).
+
+-spec list(Name :: atom(), Limit :: integer()) ->
+    {ok, List :: [binary()]} | {error, Error :: term()}.
+list(Name, Limit) ->
     Args = [{"command", "list"}, {"limit", Limit}],
-    Data = do_command(Args),
+    Data = do_command(Name, Args),
     case dict:fetch(<<"result">>, Data) of
         <<"ok">> -> 
             {list, List} = dict:fetch(<<"calls">>, Data),
@@ -100,71 +121,20 @@ list(Limit) ->
         E -> {error, E}
     end.
 
-query(CallId) -> query(CallId, []).
-query(CallId, Args) ->
+-spec query(Name :: atom(), CallId :: nonempty_string()) ->
+    {ok, Data :: dict:dict()} | {error, Error :: term()}.
+query(Name, CallId) -> query(Name, CallId, []).
+
+-spec query(Name :: atom(), CallId :: nonempty_string(), Args :: list()) ->
+    {ok, Data :: dict:dict()} | {error, Error :: term()}.
+query(Name, CallId, Args) ->
     Args1 = [{"command", "query"}, {"call-id", CallId} | Args],
-    Data = do_command(Args1),
+    Data = do_command(Name, Args1),
     case dict:fetch(<<"result">>, Data) of
         <<"ok">> -> {ok, Data};
         E -> {error, E}
     end.
 
 %%%===================================================================
-%%% gen_server callbacks
-%%%===================================================================
-
-init(Args) ->
-    {ok, Socket} = gen_udp:open(0, [binary]),
-    IP = proplists:get_value(ip, Args, "127.0.0.1"),
-    Port = proplists:get_value(port, Args, 11234),
-    {ok, #state{socket = Socket, proxy_ip = IP, proxy_port = Port}}.
-
-handle_call({do_command, Args}, From, #state{tx_list = TXList, socket = Socket, proxy_ip = IP, proxy_port = Port} = State) ->
-    error_logger:info_msg("do_command: ~p", [Args]),
-    Cookie = cookie(),
-    Data = bencode(Args),
-    error_logger:info_msg("Packet: ~p ~p", [Cookie, Data]),
-    gen_udp:send(Socket, IP, Port, <<Cookie/binary, " ", Data/binary>>),
-    {noreply, State#state{tx_list = gb_trees:enter(Cookie, From, TXList)}};
-
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
-
-handle_cast(_Msg, State) ->
-    {noreply, State}.
-
-handle_info({udp, _, _, _, <<Cookie:?COOKIE_LEN/binary, " ", Data/binary>>}, #state{tx_list = TXList} = State) ->
-    case gb_trees:lookup(Cookie, TXList) of
-        none -> 
-            error_logger:error_msg("Not found tx for: ~p ~p", [Cookie, Data]);
-        {value, From} -> 
-            error_logger:info_msg("Recieved data: ~p for ~p", [Data, From]),
-            gen_server:reply(From, bencode:decode(Data))
-    end,
-    {noreply, State#state{tx_list = gb_trees:delete_any(Cookie, TXList)}};
-
-handle_info(_Info, State) ->
-    error_logger:warning_msg("Unknown info message: ~p", [_Info]),
-    {noreply, State}.
-
-terminate(_Reason, _State) ->
-    ok.
-
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
-%%%===================================================================
 %%% Internal functions
 %%%===================================================================
-cookie() ->
-    Len = round(?COOKIE_LEN/2),
-    << <<Y>> || <<X:4>> <= crypto:strong_rand_bytes(Len), 
-                Y <- integer_to_list(X, 16) >>.
-
-bencode(List) ->
-    Dict = lists:foldl(fun({K, V}, D) ->
-                           dict:store(K, V, D)
-                       end, dict:new(), List),
-    Data = {dict, Dict},
-    bencode:encode(Data).
