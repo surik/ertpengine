@@ -1,4 +1,4 @@
-# Sipwie ertpengine client in Erlang
+# Sipwise ertpengine client in Erlang
 
 ## Installation (rebar.config):
 
